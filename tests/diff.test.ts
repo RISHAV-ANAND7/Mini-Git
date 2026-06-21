@@ -1,7 +1,4 @@
-// tests/diff.test.ts
-// Unit tests for the Myers diff algorithm implementation.
-// Tests use known inputs/outputs so correctness is verified independently
-// of any other module.
+
 
 import { myersDiff, formatUnifiedDiff, unifiedDiffStrings } from '../src/diff';
 import type { DiffOp } from '../src/types';
@@ -31,7 +28,6 @@ function applyDiffReverse(newLines: string[], ops: DiffOp[]): string[] {
   return result;
 }
 
-// ─── edge cases ──────────────────────────────────────────────────────────────
 
 describe('myersDiff — edge cases', () => {
   it('two empty arrays → empty diff', () => {

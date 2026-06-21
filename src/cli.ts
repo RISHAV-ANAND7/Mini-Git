@@ -1,7 +1,4 @@
-#!/usr/bin/env node
-// src/cli.ts
-// Mini-Git CLI — thin wrapper that maps commander sub-commands to
-// the pure command implementations in commands.ts.
+
 
 import { Command } from 'commander';
 import * as path from 'path';
@@ -189,4 +186,3 @@ program
 
 program.parse(process.argv);
 
-// ─── ls-tree ──────────────────────────────────────────────────────────────────

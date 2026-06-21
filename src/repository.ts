@@ -1,27 +1,15 @@
-// src/repository.ts
-// Repository: owns the `.mgit/` directory layout and provides
-// high-level operations on HEAD, refs, and the staging index.
-//
-// Directory layout:
-//   .mgit/
-//   ├── HEAD              — "ref: refs/heads/main"  or a raw commit hash
-//   ├── index             — JSON array of IndexEntry
-//   ├── objects/          — content-addressable loose objects
-//   │   └── <2-char>/
-//   │       └── <38-char>
-//   └── refs/
-//       └── heads/        — branch files, each containing a commit hash
 
-import * as fs   from 'fs';
+
+import * as fs from 'fs';
 import * as path from 'path';
 import { ObjectStore } from './store';
 import { isValidHash } from './hash';
 import { listFiles } from './utils';
 import type { Hash, Index, HeadRef, IndexEntry } from './types';
 
-export const MGIT_DIR       = '.mgit';
-export const HEAD_FILE      = 'HEAD';
-export const INDEX_FILE     = 'index';
+export const MGIT_DIR = '.mgit';
+export const HEAD_FILE = 'HEAD';
+export const INDEX_FILE = 'index';
 export const REFS_HEADS_DIR = path.join('refs', 'heads');
 export const DEFAULT_BRANCH = 'main';
 
@@ -30,19 +18,16 @@ export function isValidBranchName(name: string): boolean {
 }
 
 export class Repository {
-  readonly root: string;    // absolute path to the working directory
+  readonly root: string;
   readonly mgitDir: string; // absolute path to .mgit/
   readonly store: ObjectStore;
 
   constructor(root: string) {
-    this.root    = root;
+    this.root = root;
     this.mgitDir = path.join(root, MGIT_DIR);
-    this.store   = new ObjectStore(this.mgitDir);
+    this.store = new ObjectStore(this.mgitDir);
   }
 
-  // ─── Init ─────────────────────────────────────────────────────────────────
-
-  /** Initialise a fresh .mgit directory.  Throws if one already exists. */
   init(): void {
     if (fs.existsSync(this.mgitDir)) {
       throw new Error(`Already a mini-git repository: ${this.mgitDir}`);
@@ -78,7 +63,6 @@ export class Repository {
     fs.writeFileSync(path.join(this.mgitDir, HEAD_FILE), content, 'utf8');
   }
 
-  /** Resolve HEAD to a commit hash, or null if the branch is unborn. */
   resolveHead(): Hash | null {
     const head = this.readHead();
     if (head.type === 'detached') return head.hash;
@@ -99,8 +83,7 @@ export class Repository {
   writeBranch(name: string, hash: Hash): void {
     if (!isValidBranchName(name)) throw new Error(`Invalid branch name: ${name}`);
     const p = this.branchPath(name);
-    // Branch names may contain '/' (e.g. feature/auth) — ensure the
-    // subdirectory exists before writing.
+
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, hash, 'utf8');
   }
@@ -111,7 +94,6 @@ export class Repository {
     return listFiles(dir);
   }
 
-  /** Current branch name, or null if HEAD is detached. */
   currentBranch(): string | null {
     const head = this.readHead();
     return head.type === 'branch' ? head.name : null;
@@ -149,9 +131,7 @@ export class Repository {
     this.writeIndex(index);
   }
 
-  // ─── Guard ────────────────────────────────────────────────────────────────
 
-  /** Throw a helpful error if we're not inside a mini-git repo. */
   assertInitialised(): void {
     if (!fs.existsSync(this.mgitDir)) {
       throw new Error(
@@ -160,9 +140,7 @@ export class Repository {
     }
   }
 
-  // ─── Static factory ───────────────────────────────────────────────────────
 
-  /** Walk up from cwd looking for a .mgit directory, like real Git does. */
   static discover(startDir: string = process.cwd()): Repository {
     let dir = startDir;
     while (true) {

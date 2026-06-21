@@ -1,10 +1,7 @@
-// tests/integration.test.ts
-// End-to-end integration test: simulates a realistic multi-branch workflow
-// entirely within a temp directory, exercising every major command in sequence.
 
-import * as os   from 'os';
+import * as os from 'os';
 import * as path from 'path';
-import * as fs   from 'fs';
+import * as fs from 'fs';
 import {
   cmdInit, cmdAdd, cmdAddAll, cmdCommit, cmdLog,
   cmdCheckout, cmdBranch, cmdSwitch, cmdDiff,
@@ -44,7 +41,6 @@ describe('Full multi-branch workflow', () => {
   });
 
   it('full workflow: init → add → commit → branch → switch → commit → checkout', () => {
-    // ── Phase 1: initial commit on main ──────────────────────────────────────
     write(root, 'README.md', '# Project\n');
     write(root, 'src/index.ts', 'export const version = "1.0.0";\n');
 

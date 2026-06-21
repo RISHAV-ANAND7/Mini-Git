@@ -1,10 +1,8 @@
-// tests/commands.test.ts
-// Integration tests for the full init → add → commit → log → checkout cycle.
-// All tests run in isolated temp directories.
 
-import * as os   from 'os';
+
+import * as os from 'os';
 import * as path from 'path';
-import * as fs   from 'fs';
+import * as fs from 'fs';
 import {
   cmdInit,
   cmdAdd,
@@ -17,7 +15,6 @@ import {
 } from '../src/commands';
 import { Repository } from '../src/repository';
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function tempRepo(): { root: string; repo: Repository } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mgit-cmd-test-'));
@@ -221,13 +218,13 @@ describe('cmdCommit', () => {
   it('allows empty index commit if removing the final tracked file', () => {
     // Add a file in the first commit
     const { hash: firstHash } = cmdCommit(repo, 'first commit', 'Test <t@t.com>');
-    
+
     // Now simulate deleting all tracked files
     repo.writeIndex([]);
-    
+
     // This should now succeed
     const { hash: secondHash } = cmdCommit(repo, 'delete all', 'Test <t@t.com>');
-    
+
     const commit = repo.store.read(secondHash);
     if (commit.type !== 'commit') throw new Error('not a commit');
     const tree = repo.store.read(commit.treeHash);

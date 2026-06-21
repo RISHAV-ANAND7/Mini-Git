@@ -1,23 +1,8 @@
-// src/store.ts
-// Content-addressable object store.
-//
-// Objects are stored in `.mgit/objects/<2-char-prefix>/<38-char-rest>`.
-// Each file contains the serialised form of a BlobObject, TreeObject, or
-// CommitObject.  Serialisation is a simple text format (not zlib compressed,
-// unlike real Git) so that the files are human-readable for learning purposes.
-//
-// Serialisation format
-// ─────────────────────
-//   blob <content-length>\n<content>
-//   tree <entry-count>\n<mode> <name> <hash>\n...
-//   commit\ntree <treeHash>\nparent <parentHash|null>\nauthor <author>\ntimestamp <ms>\n\n<message>
-
 import * as fs from 'fs';
 import * as path from 'path';
 import { sha1, objectPath } from './hash';
 import type { Hash, MgitObject, BlobObject, TreeObject, CommitObject, TreeEntry } from './types';
 
-// ─── Serialisation ────────────────────────────────────────────────────────────
 
 export function serialiseBlob(obj: BlobObject): Buffer {
   const header = Buffer.from(`blob ${obj.content.length}\n`, 'utf8');
@@ -48,8 +33,8 @@ export function serialiseCommit(obj: CommitObject): Buffer {
 
 export function serialise(obj: MgitObject): Buffer {
   switch (obj.type) {
-    case 'blob':   return serialiseBlob(obj);
-    case 'tree':   return serialiseTree(obj);
+    case 'blob': return serialiseBlob(obj);
+    case 'tree': return serialiseTree(obj);
     case 'commit': return serialiseCommit(obj);
   }
 }
@@ -80,8 +65,8 @@ export function deserialise(raw: Buffer): MgitObject {
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
         if (i === parts.length - 1) {
-           if (part !== '') throw new Error('Tree body must end with null byte');
-           continue;
+          if (part !== '') throw new Error('Tree body must end with null byte');
+          continue;
         }
         const space1 = part.indexOf(' ');
         const space2 = part.indexOf(' ', space1 + 1);
@@ -98,7 +83,7 @@ export function deserialise(raw: Buffer): MgitObject {
       }
     }
     if (entries.length !== expectedEntries) {
-       throw new Error(`Tree entry count mismatch: expected ${expectedEntries}, got ${entries.length}`);
+      throw new Error(`Tree entry count mismatch: expected ${expectedEntries}, got ${entries.length}`);
     }
     return { type: 'tree', entries };
   }
@@ -113,21 +98,21 @@ export function deserialise(raw: Buffer): MgitObject {
     };
     const treeHash = get('tree ');
     if (!/^[0-9a-f]{40}$/.test(treeHash)) throw new Error(`Invalid commit tree hash: ${treeHash}`);
-    
+
     const parentRaw = get('parent ');
     const parentHash = parentRaw === 'null' ? null : parentRaw;
     if (parentHash && !/^[0-9a-f]{40}$/.test(parentHash)) throw new Error(`Invalid commit parent hash: ${parentHash}`);
-    
+
     const author = get('author ');
     if (!author) throw new Error(`Commit author cannot be empty`);
-    
+
     const timestampStr = get('timestamp ');
     const timestamp = parseInt(timestampStr, 10);
     if (isNaN(timestamp)) throw new Error(`Invalid commit timestamp: ${timestampStr}`);
-    
+
     const blankIdx = lines.indexOf('');
     if (blankIdx === -1) throw new Error('Commit missing blank line before message');
-    
+
     const message = lines.slice(blankIdx + 1).join('\n');
     return { type: 'commit', treeHash, parentHash, author, timestamp, message };
   }
@@ -144,18 +129,16 @@ export class ObjectStore {
     this.objectsDir = path.join(mgitDir, 'objects');
   }
 
-  /** Write an object to disk and return its SHA-1 hash. Idempotent. */
   write(obj: MgitObject): Hash {
-    const raw  = serialise(obj);
+    const raw = serialise(obj);
     const hash = sha1(raw);
     const { dir, file } = objectPath(hash);
-    const dirPath  = path.join(this.objectsDir, dir);
+    const dirPath = path.join(this.objectsDir, dir);
     const filePath = path.join(dirPath, file);
 
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
     }
-    // Idempotent — don't overwrite if already present (same content ⟹ same hash)
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, raw);
     }
@@ -181,8 +164,6 @@ export class ObjectStore {
     const { dir, file } = objectPath(hash);
     return fs.existsSync(path.join(this.objectsDir, dir, file));
   }
-
-  /** Return the raw serialised content for a given hash (for verification). */
   readRaw(hash: Hash): Buffer {
     const { dir, file } = objectPath(hash);
     const filePath = path.join(this.objectsDir, dir, file);

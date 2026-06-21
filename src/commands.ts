@@ -1,9 +1,6 @@
-// src/commands.ts
-// High-level command implementations.
-// Each function mirrors one CLI sub-command and is kept pure enough
-// to be unit-tested without spinning up a real CLI.
 
-import * as fs   from 'fs';
+
+import * as fs from 'fs';
 import { listFilesRecursive, ensureInsideRepo } from './utils';
 import * as path from 'path';
 import { sha1, shortHash } from './hash';
@@ -19,7 +16,6 @@ import type {
   TreeEntry,
 } from './types';
 
-// ─── init ────────────────────────────────────────────────────────────────────
 
 export function cmdInit(root: string): string {
   const repo = new Repository(root);
@@ -54,21 +50,14 @@ export function cmdAdd(repo: Repository, filePath: string): string {
 }
 
 
-// ─── add . (all files) ───────────────────────────────────────────────────────
-
-/**
- * Stage all tracked files in the working tree.
- * Skips .mgit/ automatically (via listFilesRecursive).
- * Mirrors `git add .`
- */
 export function cmdAddAll(repo: Repository): string {
   repo.assertInitialised();
   const filesOnDisk = listFilesRecursive(repo.root);
   const index = repo.readIndex();
-  
+
   const allFiles = new Set([...filesOnDisk, ...index.map(e => e.path)]);
   if (allFiles.size === 0) return 'Nothing to add.';
-  
+
   const results: string[] = [];
   for (const file of allFiles) {
     const absPath = path.join(repo.root, file);
@@ -154,9 +143,9 @@ export function cmdLog(repo: Repository): LogEntry[] {
 
     entries.push({
       hash,
-      short:   shortHash(hash),
-      author:  obj.author,
-      date:    new Date(obj.timestamp).toISOString(),
+      short: shortHash(hash),
+      author: obj.author,
+      date: new Date(obj.timestamp).toISOString(),
       message: obj.message,
     });
 
@@ -228,7 +217,7 @@ export function cmdCheckout(repo: Repository, ref: string): string {
   // Safe-checkout conflict detection
   const currentIndex = repo.readIndex();
   const indexMap = new Map(currentIndex.map(e => [e.path, e.hash]));
-  
+
   const workingFiles = listFilesRecursive(repo.root);
   const workingMap = new Map<string, Hash>();
   for (const f of workingFiles) {
@@ -274,7 +263,7 @@ export function cmdCheckout(repo: Repository, ref: string): string {
       }
       parentDir = path.dirname(parentDir);
     }
-    
+
     // Shape conflict: descendant is an untracked file
     for (const workingFile of workingMap.keys()) {
       if (workingFile.startsWith(p + '/') && !indexMap.has(workingFile)) {
@@ -298,7 +287,7 @@ export function cmdCheckout(repo: Repository, ref: string): string {
   const crypto = require('crypto');
   const tmpDir = path.join(repo.mgitDir, 'tmp');
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-  
+
   const tempFiles = new Map<string, string>();
   for (const [p, content] of targetBlobs.entries()) {
     const tempPath = path.join(tmpDir, crypto.randomBytes(8).toString('hex'));
@@ -324,18 +313,18 @@ export function cmdCheckout(repo: Repository, ref: string): string {
 
   for (const p of pathsToUpdate) {
     const absPath = ensureInsideRepo(repo.root, p);
-    
+
     if (fs.existsSync(absPath) && fs.statSync(absPath).isDirectory()) {
       fs.rmSync(absPath, { recursive: true, force: true });
     }
-    
+
     const dir = path.dirname(absPath);
     if (fs.existsSync(dir) && fs.statSync(dir).isFile()) {
       fs.unlinkSync(dir);
     }
-    
+
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    
+
     fs.renameSync(tempFiles.get(p)!, absPath);
     restored.push(p);
   }
@@ -368,7 +357,7 @@ export function cmdDiff(repo: Repository, staged: boolean = false): string {
   repo.assertInitialised();
 
   const index = repo.readIndex();
-  
+
   const parts: string[] = [];
 
   if (staged) {
@@ -387,7 +376,7 @@ export function cmdDiff(repo: Repository, staged: boolean = false): string {
     for (const p of Array.from(allPaths).sort()) {
       const hHash = headFiles.get(p);
       const iHash = indexMap.get(p);
-      
+
       if (hHash === iHash) continue;
 
       let headContent = '';
@@ -405,12 +394,12 @@ export function cmdDiff(repo: Repository, staged: boolean = false): string {
       const diff = unifiedDiffStrings(`a/${p}`, `b/${p}`, headContent, indexContent);
       if (diff) parts.push(diff);
     }
-    
+
     return parts.length > 0 ? parts.join('\n\n') : 'No differences (index matches HEAD)';
 
   } else {
     if (index.length === 0) return 'Nothing staged. Use: mgit add <file>';
-    
+
     for (const entry of index) {
       const absPath = path.join(repo.root, entry.path);
       const workingContent = fs.existsSync(absPath)
@@ -444,8 +433,8 @@ export function cmdBranch(repo: Repository, name?: string): string {
 
   if (!name) {
     // List branches
-    const branches  = repo.listBranches();
-    const current   = repo.currentBranch();
+    const branches = repo.listBranches();
+    const current = repo.currentBranch();
     const lines = branches.map(b => b === current ? `* ${b}` : `  ${b}`);
     return lines.length > 0 ? lines.join('\n') : '(no branches yet)';
   }
@@ -479,12 +468,7 @@ export function cmdSwitch(repo: Repository, branchName: string): string {
   return result;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Resolve a partial or full hash to a full 40-char hash by scanning the
- * object store.  Returns null if not found.
- */
 function resolveRef(repo: Repository, ref: string): Hash | null {
   // Try exact match first
   if (repo.store.exists(ref)) return ref;
@@ -493,31 +477,25 @@ function resolveRef(repo: Repository, ref: string): Hash | null {
   const objectsDir = path.join(repo.mgitDir, 'objects');
   if (!fs.existsSync(objectsDir)) return null;
 
-  const prefix2  = ref.slice(0, 2);
-  const rest     = ref.slice(2);
-  const subDir   = path.join(objectsDir, prefix2);
+  const prefix2 = ref.slice(0, 2);
+  const rest = ref.slice(2);
+  const subDir = path.join(objectsDir, prefix2);
 
   if (!fs.existsSync(subDir)) return null;
 
   const matches = fs.readdirSync(subDir).filter(f => f.startsWith(rest));
   if (matches.length === 1) return prefix2 + matches[0];
-  if (matches.length > 1)   throw new Error(`Ambiguous ref: ${ref}`);
+  if (matches.length > 1) throw new Error(`Ambiguous ref: ${ref}`);
   return null;
 }
 
 function getAuthor(): string {
   // Prefer env vars (mirrors Git's GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL pattern)
-  const name  = process.env['MGIT_AUTHOR_NAME']  ?? process.env['USER'] ?? 'unknown';
+  const name = process.env['MGIT_AUTHOR_NAME'] ?? process.env['USER'] ?? 'unknown';
   const email = process.env['MGIT_AUTHOR_EMAIL'] ?? `${name}@localhost`;
   return `${name} <${email}>`;
 }
 
-// ─── hash-object (plumbing) ───────────────────────────────────────────────────
-
-/**
- * Hash a file and print its SHA-1 without staging it.
- * Mirrors `git hash-object <file>`.
- */
 export function cmdHashObject(filePath: string): Hash {
   const fs = require('fs') as typeof import('fs');
   const content = fs.readFileSync(filePath);
@@ -525,12 +503,6 @@ export function cmdHashObject(filePath: string): Hash {
   return sha1(serialise(blob));
 }
 
-// ─── ls-tree ─────────────────────────────────────────────────────────────────
-
-/**
- * List the contents of a tree object (by commit hash or tree hash).
- * Mirrors `git ls-tree <ref>`.
- */
 export function cmdLsTree(repo: Repository, ref: string): string {
   repo.assertInitialised();
 
@@ -625,7 +597,7 @@ export function cmdStatus(repo: Repository): string {
 
   const lines: string[] = [];
   lines.push(head.type === 'branch' ? `On branch ${head.name}` : `HEAD detached at ${head.hash.slice(0, 7)}`);
-  
+
   if (staged.length > 0) {
     lines.push('\nChanges to be committed:');
     staged.forEach(p => lines.push(`  modified/added:   ${p}`));
@@ -638,7 +610,7 @@ export function cmdStatus(repo: Repository): string {
     lines.push('\nUntracked files:');
     untracked.forEach(p => lines.push(`  ${p}`));
   }
-  
+
   if (staged.length === 0 && unstaged.length === 0 && untracked.length === 0) {
     lines.push('nothing to commit, working tree clean');
   }

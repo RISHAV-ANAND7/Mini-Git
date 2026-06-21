@@ -1,18 +1,5 @@
-// src/diff.ts
-// Myers diff algorithm — the same O(ND) algorithm that GNU diff and Git use.
-//
-// Reference: Eugene W. Myers, "An O(ND) Difference Algorithm and Its Variations"
-//            Algorithmica, 1986.
-
 import type { DiffOp, DiffOpType } from './types';
 
-// ─── Forward pass ─────────────────────────────────────────────────────────────
-
-/**
- * Run Myers forward algorithm.
- * Returns trace where trace[d] = v[] snapshot AFTER depth d ran
- * (i.e., the state that can be used to answer "where were we before depth d+1?").
- */
 function computeTrace(a: string[], b: string[]): [number[][], number] {
   const n = a.length, m = b.length;
   const max = n + m, off = max;
@@ -32,9 +19,8 @@ function computeTrace(a: string[], b: string[]): [number[][], number] {
       while (x < n && y < m && a[x] === b[y]) { x++; y++; }
       v[ki] = x;
     }
-    trace.push(v.slice()); // snapshot AFTER depth d ran
+    trace.push(v.slice());
     if ((v[0 + off] ?? 0) >= n && (0 - (v[0 + off] ?? 0)) >= -m) {
-      // Check all k diagonals for termination
     }
     // Check if done
     for (let k = -d; k <= d; k += 2) {
@@ -62,7 +48,6 @@ function backtrack(
   let x = n, y = m;
 
   for (let depth = d; depth > 0; depth--) {
-    // trace[depth-1] = v[] state AFTER depth (depth-1) ran = before depth ran
     const vBefore = trace[depth - 1]!;
     const k = x - y;
     const ki = k + off;
@@ -72,16 +57,13 @@ function backtrack(
       (k !== depth && (vBefore[ki - 1] ?? 0) < (vBefore[ki + 1] ?? 0));
 
     const prevK = cameDown ? k + 1 : k - 1;
-    // prevX is where the snake ENDED at depth-1 on diagonal prevK
     const prevX = vBefore[prevK + off] ?? 0;
     const prevY = prevX - prevK;
 
-    // The edit happened at (prevX, prevY):
-    //   insert: (prevX, prevY) -> (prevX, prevY+1) then snake to (x, y)
-    //   delete: (prevX, prevY) -> (prevX+1, prevY) then snake to (x, y)
-    const snakeStartX = cameDown ? prevX     : prevX + 1;
+
+    const snakeStartX = cameDown ? prevX : prevX + 1;
     const snakeStartY = cameDown ? prevY + 1 : prevY;
-    const snakeLen    = x - snakeStartX;
+    const snakeLen = x - snakeStartX;
 
     // Emit in reverse order (we'll reverse at end): snake first, then edit
     for (let i = snakeLen - 1; i >= 0; i--) {
@@ -152,7 +134,7 @@ export function formatUnifiedDiff(
   for (const op of ops) {
     for (const text of op.lines) {
       ann.push({ op: op.op, text, oldNo: oi, newNo: ni });
-      if (op.op === 'equal')  { oi++; ni++; }
+      if (op.op === 'equal') { oi++; ni++; }
       if (op.op === 'delete') { oi++; }
       if (op.op === 'insert') { ni++; }
     }
@@ -184,7 +166,7 @@ export function formatUnifiedDiff(
 
     for (let j = i; j <= end; j++) {
       const r = ann[j]!;
-      if (r.op === 'equal')  { hunkLines.push(` ${r.text}`); oldCount++; newCount++; }
+      if (r.op === 'equal') { hunkLines.push(` ${r.text}`); oldCount++; newCount++; }
       if (r.op === 'delete') { hunkLines.push(`-${r.text}`); oldCount++; }
       if (r.op === 'insert') { hunkLines.push(`+${r.text}`); newCount++; }
     }
