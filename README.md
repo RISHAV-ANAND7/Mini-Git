@@ -1,8 +1,18 @@
 # Mini-Git (`mgit`)
 
-A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, and branching. Minimal runtime dependencies (only `commander`).
+[![CI](https://github.com/RISHAV-ANAND7/mini-git/actions/workflows/ci.yml/badge.svg)](https://github.com/RISHAV-ANAND7/mini-git/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](https://github.com/RISHAV-ANAND7/mini-git)
+
+A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, and branching. Zero dependencies in the storage and diff engines (only `commander` for the CLI).
 
 Built as a resume-grade systems project demonstrating deep understanding of how Git works under the hood.
+
+---
+
+## Demo
+
+![Terminal Demo (Placeholder)](https://raw.githubusercontent.com/RISHAV-ANAND7/mini-git/main/demo.gif)
+*(Replace this with a recording of init, add, commit, diff, and log using asciinema or terminalizer)*
 
 ---
 
@@ -77,7 +87,8 @@ Working Directory          Staging Index           Object Store (.mgit/objects/)
 - `mgit checkout <ref>` — restores working directory from commit hash or branch
 
 ### Diff (Myers algorithm)
-- `mgit diff` — unified diff of working tree vs last commit
+- `mgit diff` — unified diff of working tree vs index
+- `mgit diff -s, --staged` — unified diff of index vs HEAD
 - Implements Eugene Myers' O(ND) algorithm (same as GNU diff / Git)
 
 ### Branching
@@ -139,6 +150,7 @@ Objects use binary formatting for content (`Buffer` for Blobs) and null-byte ter
 ```
 blob <byte-length>\n<raw-binary-content>
 ```
+*(Blobs are strictly binary-safe and can store any file type, not just text.)*
 
 **Tree:**
 ```
@@ -163,7 +175,7 @@ npm run test:coverage    # with coverage report
 ```
 
 Test coverage includes:
-- SHA-1 hashing (RFC test vectors, content-addressable determinism)
+- SHA-1 hashing (RFC test vectors, determinism and known digest vectors)
 - Object serialisation round-trips for all three types
 - ObjectStore disk I/O (write/read/exists, content-addressability verification)
 - Full `init → add → commit → log` cycle
@@ -189,6 +201,15 @@ The implementation in `src/diff.ts` is self-contained with zero dependencies and
 ---
 
 ## Architecture
+
+```mermaid
+graph TD
+    CLI["src/cli.ts (Commander Wrapper)"] --> Cmd["src/commands.ts (Pure Commands)"]
+    Cmd --> Repo["src/repository.ts (State & Refs)"]
+    Cmd --> Diff["src/diff.ts (Myers Diff)"]
+    Repo --> Store["src/store.ts (Object Store)"]
+    Store --> Hash["src/hash.ts (SHA-1)"]
+```
 
 ```
 src/

@@ -1,6 +1,6 @@
 {
   "name": "mini-git",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, branching",
   "main": "dist/cli.js",
   "bin": {

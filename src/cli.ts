@@ -96,11 +96,12 @@ program
 // ─── diff ────────────────────────────────────────────────────────────────────
 program
   .command('diff')
-  .description('Show line-level diff between working tree and last commit (Myers)')
-  .action(() => {
+  .description('Show line-level diff between working tree and index (Myers)')
+  .option('-s, --staged', 'Compare index to HEAD instead of working tree to index')
+  .action((opts: { staged?: boolean }) => {
     run(() => {
       const repo = Repository.discover();
-      const output = cmdDiff(repo);
+      const output = cmdDiff(repo, opts.staged);
       if (output) console.log(output);
     });
   });

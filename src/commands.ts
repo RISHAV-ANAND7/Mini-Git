@@ -313,38 +313,77 @@ export function cmdCheckout(repo: Repository, ref: string): string {
 
 // ─── diff ────────────────────────────────────────────────────────────────────
 
-export function cmdDiff(repo: Repository): string {
+export function cmdDiff(repo: Repository, staged: boolean = false): string {
   repo.assertInitialised();
 
   const index = repo.readIndex();
-  if (index.length === 0) return 'Nothing staged. Use: mgit add <file>';
-
+  
   const parts: string[] = [];
 
-  for (const entry of index) {
-    const absPath = path.join(repo.root, entry.path);
-    const workingContent = fs.existsSync(absPath)
-      ? fs.readFileSync(absPath, 'utf8')
-      : '';
-
-    // Find index content for this path
-    let indexContent = '';
-    const blobObj = repo.store.read(entry.hash);
-    if (blobObj.type === 'blob') {
-      indexContent = blobObj.content.toString('utf8');
+  if (staged) {
+    const headHash = repo.resolveHead();
+    let headFiles = new Map<string, Hash>();
+    if (headHash) {
+      const commitObj = repo.store.read(headHash);
+      if (commitObj.type === 'commit') {
+        headFiles = flattenTree(repo, commitObj.treeHash);
+      }
     }
 
-    const diff = unifiedDiffStrings(
-      `a/${entry.path}`,
-      `b/${entry.path}`,
-      indexContent,
-      workingContent,
-    );
+    const indexMap = new Map(index.map(e => [e.path, e.hash]));
+    const allPaths = new Set([...headFiles.keys(), ...indexMap.keys()]);
 
-    if (diff) parts.push(diff);
+    for (const p of Array.from(allPaths).sort()) {
+      const hHash = headFiles.get(p);
+      const iHash = indexMap.get(p);
+      
+      if (hHash === iHash) continue;
+
+      let headContent = '';
+      if (hHash) {
+        const blobObj = repo.store.read(hHash);
+        if (blobObj.type === 'blob') headContent = blobObj.content.toString('utf8');
+      }
+
+      let indexContent = '';
+      if (iHash) {
+        const blobObj = repo.store.read(iHash);
+        if (blobObj.type === 'blob') indexContent = blobObj.content.toString('utf8');
+      }
+
+      const diff = unifiedDiffStrings(`a/${p}`, `b/${p}`, headContent, indexContent);
+      if (diff) parts.push(diff);
+    }
+    
+    return parts.length > 0 ? parts.join('\n\n') : 'No differences (index matches HEAD)';
+
+  } else {
+    if (index.length === 0) return 'Nothing staged. Use: mgit add <file>';
+    
+    for (const entry of index) {
+      const absPath = path.join(repo.root, entry.path);
+      const workingContent = fs.existsSync(absPath)
+        ? fs.readFileSync(absPath, 'utf8')
+        : '';
+
+      let indexContent = '';
+      const blobObj = repo.store.read(entry.hash);
+      if (blobObj.type === 'blob') {
+        indexContent = blobObj.content.toString('utf8');
+      }
+
+      const diff = unifiedDiffStrings(
+        `a/${entry.path}`,
+        `b/${entry.path}`,
+        indexContent,
+        workingContent,
+      );
+
+      if (diff) parts.push(diff);
+    }
+
+    return parts.length > 0 ? parts.join('\n\n') : 'No differences (working tree matches index)';
   }
-
-  return parts.length > 0 ? parts.join('\n\n') : 'No differences (working tree matches index)';
 }
 
 // ─── branch ──────────────────────────────────────────────────────────────────

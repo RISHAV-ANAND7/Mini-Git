@@ -444,6 +444,24 @@ describe('cmdDiff', () => {
     const diff = cmdDiff(repo);
     expect(diff).toContain('+gamma');
   });
+
+  it('shows diff between HEAD and index when --staged is used', () => {
+    fs.writeFileSync(path.join(root, 'staged.txt'), 'version 1');
+    cmdAdd(repo, 'staged.txt');
+    cmdCommit(repo, 'first', 'A <a@a.com>');
+
+    fs.writeFileSync(path.join(root, 'staged.txt'), 'version 1\nversion 2');
+    cmdAdd(repo, 'staged.txt'); // stage it
+
+    const diff = cmdDiff(repo, true); // true = staged
+    expect(diff).toContain('+version 2');
+    expect(diff).toContain('staged.txt');
+
+    // working tree modified further, but staged shouldn't see it
+    fs.writeFileSync(path.join(root, 'staged.txt'), 'version 1\nversion 2\nversion 3');
+    const diff2 = cmdDiff(repo, true);
+    expect(diff2).not.toContain('+version 3');
+  });
 });
 
 // ─── status ──────────────────────────────────────────────────────────────────
