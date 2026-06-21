@@ -1,6 +1,6 @@
 # Mini-Git (`mgit`)
 
-A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, and branching. Zero runtime dependencies.
+A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, and branching. Minimal runtime dependencies (only `commander`).
 
 Built as a resume-grade systems project demonstrating deep understanding of how Git works under the hood.
 
@@ -21,8 +21,8 @@ Working Directory          Staging Index           Object Store (.mgit/objects/)
                                 │                             ▼
                                 └──────────────────────────► TREE
                                                               │  entries:
-                                                              │    100644 hello.txt ──► BLOB (sha1)
-                                                              │    100644 README.md ──► BLOB (sha1)
+                                                              │    100644 (sha1) hello.txt
+                                                              │    040000 (sha1) docs/   ──► TREE
                                                               │
                                                               ▼
                                                             COMMIT
@@ -44,8 +44,8 @@ Working Directory          Staging Index           Object Store (.mgit/objects/)
 
 | Type   | Contains                                        | Analogous to    |
 |--------|-------------------------------------------------|-----------------|
-| Blob   | Raw file content (text, no metadata)            | `git cat-file blob` |
-| Tree   | `mode name hash` entries (sorted by name)       | `git cat-file tree` |
+| Blob   | Raw file content (binary `Buffer`)              | `git cat-file blob` |
+| Tree   | `mode hash name\0` entries (supports subtrees)  | `git cat-file tree` |
 | Commit | treeHash + parentHash + author + message + ts   | `git cat-file commit` |
 
 ### Refs and HEAD
@@ -133,17 +133,18 @@ mgit switch main
 
 ## Serialisation Format
 
-Objects are stored as UTF-8 text (not zlib-compressed like real Git, for readability):
+Objects use binary formatting for content (`Buffer` for Blobs) and null-byte termination for trees to avoid parsing ambiguity:
 
 **Blob:**
 ```
-blob <byte-length>\n<content>
+blob <byte-length>\n<raw-binary-content>
 ```
 
 **Tree:**
 ```
-tree <entry-count>\n<mode> <name> <hash>\n...
+tree <entry-count>\n<mode> <hash> <name>\0...
 ```
+*(Trees are built recursively, where subdirectories are stored as `040000` tree objects).*
 
 **Commit:**
 ```
@@ -162,7 +163,7 @@ npm run test:coverage    # with coverage report
 ```
 
 Test coverage includes:
-- SHA-1 hashing (RFC test vectors, collision resistance, determinism)
+- SHA-1 hashing (RFC test vectors, content-addressable determinism)
 - Object serialisation round-trips for all three types
 - ObjectStore disk I/O (write/read/exists, content-addressability verification)
 - Full `init → add → commit → log` cycle

@@ -71,10 +71,9 @@ export function cmdAddAll(repo: Repository): string {
   
   const results: string[] = [];
   for (const file of allFiles) {
-    try {
+    const absPath = path.join(repo.root, file);
+    if (fs.existsSync(absPath) || index.some(e => e.path === file)) {
       results.push(cmdAdd(repo, file));
-    } catch (e) {
-      // Ignore files that are not on disk and not in index
     }
   }
   return results.filter(Boolean).join('\n');
@@ -211,12 +210,21 @@ export function cmdCheckout(repo: Repository, ref: string): string {
     throw new Error(`Not a tree: ${commitObj.treeHash}`);
   }
 
+  // Find current HEAD tree to know what was originally checked out
+  const headHash = repo.resolveHead();
+  let headFiles = new Map<string, Hash>();
+  if (headHash) {
+    const headObj = repo.store.read(headHash);
+    if (headObj.type === 'commit') {
+      headFiles = flattenTree(repo, headObj.treeHash);
+    }
+  }
+
   // Restore files
   const restored: string[] = [];
   const targetFiles = flattenTree(repo, commitObj.treeHash);
-  const targetPaths = new Set(targetFiles.keys());
 
-  // Safe-checkout conflict detection: Untracked and Unstaged changes
+  // Safe-checkout conflict detection
   const currentIndex = repo.readIndex();
   const indexMap = new Map(currentIndex.map(e => [e.path, e.hash]));
   
@@ -229,55 +237,68 @@ export function cmdCheckout(repo: Repository, ref: string): string {
     workingMap.set(f, sha1(serialise({ type: 'blob', content })));
   }
 
-  for (const targetPath of targetPaths) {
-    const targetHash = targetFiles.get(targetPath)!;
-    const inIndex = indexMap.has(targetPath);
-    const inWorking = workingMap.has(targetPath);
-    
-    if (inWorking) {
-      if (!inIndex) {
-        throw new Error(`The following untracked working tree files would be overwritten by checkout:\n  ${targetPath}\nPlease move or remove them before you switch branches.`);
-      } else {
-        if (workingMap.get(targetPath) !== indexMap.get(targetPath)) {
-          throw new Error(`Your local changes to '${targetPath}' would be overwritten by checkout.\nPlease commit your changes before you switch branches.`);
-        }
+  const pathsToUpdate = new Set<string>();
+  const pathsToDelete = new Set<string>();
+
+  for (const [p, targetHash] of targetFiles.entries()) {
+    if (headFiles.get(p) !== targetHash) {
+      pathsToUpdate.add(p);
+    }
+  }
+  for (const p of headFiles.keys()) {
+    if (!targetFiles.has(p)) {
+      pathsToDelete.add(p);
+    }
+  }
+
+  for (const p of new Set([...pathsToUpdate, ...pathsToDelete])) {
+    const inIndex = indexMap.has(p);
+    const inWorking = workingMap.has(p);
+
+    if (!inIndex && inWorking) {
+      throw new Error(`The following untracked working tree files would be overwritten by checkout:\n  ${p}\nPlease move or remove them before you switch branches.`);
+    }
+
+    const isStaged = indexMap.get(p) !== headFiles.get(p);
+    const isUnstaged = inWorking ? (workingMap.get(p) !== indexMap.get(p)) : inIndex;
+
+    if (isStaged || isUnstaged) {
+      throw new Error(`Your local changes to '${p}' would be overwritten by checkout.\nPlease commit your changes or stash them before you switch branches.`);
+    }
+  }
+
+  for (const p of pathsToDelete) {
+    const absPath = ensureInsideRepo(repo.root, p);
+    if (fs.existsSync(absPath)) {
+      fs.unlinkSync(absPath);
+      let dir = path.dirname(absPath);
+      while (dir !== repo.root) {
+        try { fs.rmdirSync(dir); dir = path.dirname(dir); } catch { break; }
       }
     }
   }
 
-  for (const entry of currentIndex) {
-    if (!targetPaths.has(entry.path)) {
-      const absPath = ensureInsideRepo(repo.root, entry.path);
-      if (fs.existsSync(absPath)) {
-        fs.unlinkSync(absPath);
-        let dir = path.dirname(absPath);
-        while (dir !== repo.root) {
-          try {
-            fs.rmdirSync(dir);
-            dir = path.dirname(dir);
-          } catch { break; }
-        }
-      }
-    }
-  }
-
-  for (const [targetPath, hash] of targetFiles.entries()) {
+  for (const p of pathsToUpdate) {
+    const hash = targetFiles.get(p)!;
     const blobObj = repo.store.read(hash);
-    if (blobObj.type !== 'blob') {
-      throw new Error(`Not a blob: ${hash}`);
-    }
-    const absPath = ensureInsideRepo(repo.root, targetPath);
+    if (blobObj.type !== 'blob') throw new Error(`Not a blob: ${hash}`);
+    const absPath = ensureInsideRepo(repo.root, p);
     const dir = path.dirname(absPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(absPath, blobObj.content);
-    restored.push(targetPath);
+    restored.push(p);
   }
 
-  // Restore index to match the checked-out tree
-  const newIndex: IndexEntry[] = Array.from(targetFiles.entries()).map(([p, h]) => ({
-    path: p,
-    hash: h,
-  }));
+  const finalIndexMap = new Map(indexMap);
+  for (const p of pathsToDelete) {
+    finalIndexMap.delete(p);
+  }
+  for (const p of pathsToUpdate) {
+    finalIndexMap.set(p, targetFiles.get(p)!);
+  }
+  const newIndex: IndexEntry[] = Array.from(finalIndexMap.entries())
+    .map(([path, hash]) => ({ path, hash }))
+    .sort((a, b) => a.path.localeCompare(b.path));
   repo.writeIndex(newIndex);
 
   // Update HEAD
@@ -298,7 +319,6 @@ export function cmdDiff(repo: Repository): string {
   const index = repo.readIndex();
   if (index.length === 0) return 'Nothing staged. Use: mgit add <file>';
 
-  const commitHash = repo.resolveHead();
   const parts: string[] = [];
 
   for (const entry of index) {
@@ -307,33 +327,24 @@ export function cmdDiff(repo: Repository): string {
       ? fs.readFileSync(absPath, 'utf8')
       : '';
 
-    // Find committed content for this path
-    let committedContent = '';
-    if (commitHash) {
-      const commitObj = repo.store.read(commitHash);
-      if (commitObj.type === 'commit') {
-        const targetFiles = flattenTree(repo, commitObj.treeHash);
-        const targetHash = targetFiles.get(entry.path);
-        if (targetHash) {
-          const blobObj = repo.store.read(targetHash);
-          if (blobObj.type === 'blob') {
-            committedContent = blobObj.content.toString('utf8');
-          }
-        }
-      }
+    // Find index content for this path
+    let indexContent = '';
+    const blobObj = repo.store.read(entry.hash);
+    if (blobObj.type === 'blob') {
+      indexContent = blobObj.content.toString('utf8');
     }
 
     const diff = unifiedDiffStrings(
       `a/${entry.path}`,
       `b/${entry.path}`,
-      committedContent,
+      indexContent,
       workingContent,
     );
 
     if (diff) parts.push(diff);
   }
 
-  return parts.length > 0 ? parts.join('\n\n') : 'No differences (working tree matches HEAD)';
+  return parts.length > 0 ? parts.join('\n\n') : 'No differences (working tree matches index)';
 }
 
 // ─── branch ──────────────────────────────────────────────────────────────────

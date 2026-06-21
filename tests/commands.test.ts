@@ -415,35 +415,33 @@ describe('cmdDiff', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('shows no diff when working tree matches committed content', () => {
-    writeFile(root, 'same.txt', 'no change here');
-    cmdAdd(repo, 'same.txt');
-    cmdCommit(repo, 'base', 'D <d@d.com>');
-    // File on disk still matches commit — re-add to update index
+  it('shows no diff when working tree matches index', () => {
+    fs.writeFileSync(path.join(root, 'same.txt'), 'same');
     cmdAdd(repo, 'same.txt');
     const diff = cmdDiff(repo);
-    expect(diff).toBe('No differences (working tree matches HEAD)');
+    expect(diff).toBe('No differences (working tree matches index)');
   });
 
-  it('shows diff when working tree differs from committed content', () => {
-    writeFile(root, 'change.txt', 'original line\n');
+  it('shows diff when working tree differs from index content', () => {
+    fs.writeFileSync(path.join(root, 'change.txt'), 'old line');
     cmdAdd(repo, 'change.txt');
-    cmdCommit(repo, 'base', 'D <d@d.com>');
 
-    // Modify the file on disk, re-stage
-    writeFile(root, 'change.txt', 'original line\nnew line\n');
-    cmdAdd(repo, 'change.txt');
+    fs.writeFileSync(path.join(root, 'change.txt'), 'old line\nnew line');
 
     const diff = cmdDiff(repo);
     expect(diff).toContain('+new line');
     expect(diff).toContain('change.txt');
   });
 
-  it('shows all lines as added on first commit (new file)', () => {
-    writeFile(root, 'new.txt', 'alpha\nbeta\n');
+  it('shows all lines as added on first commit if not staged', () => {
+    // Diff compares index and working tree. If it is in index but not working tree, it's deleted. 
+    // Wait, if it's new and staged, it's in index. If we don't change working tree, working matches index.
+    // The test originally added 'new.txt', and checked diff. Now that working matches index, diff is empty!
+    // We should modify the file after staging to see a diff.
+    fs.writeFileSync(path.join(root, 'new.txt'), 'alpha\nbeta');
     cmdAdd(repo, 'new.txt');
+    fs.writeFileSync(path.join(root, 'new.txt'), 'alpha\nbeta\ngamma');
     const diff = cmdDiff(repo);
-    expect(diff).toContain('+alpha');
-    expect(diff).toContain('+beta');
+    expect(diff).toContain('+gamma');
   });
 });

@@ -14,7 +14,8 @@ export function listFilesRecursive(root: string, dir: string = root): string[] {
     const absPath = path.join(dir, entry);
     const rel     = path.relative(root, absPath).replace(/\\/g, '/');
     if (rel.startsWith('.mgit')) continue;
-    const stat = fs.statSync(absPath);
+    const stat = fs.lstatSync(absPath);
+    if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
       results.push(...listFilesRecursive(root, absPath));
     } else {
@@ -73,7 +74,9 @@ export function listFiles(dir: string, base: string = dir): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir)) {
     const absPath = path.join(dir, entry);
-    if (fs.statSync(absPath).isDirectory()) {
+    const stat = fs.lstatSync(absPath);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) {
       results.push(...listFiles(absPath, base));
     } else {
       results.push(path.relative(base, absPath).replace(/\\/g, '/'));

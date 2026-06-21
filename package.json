@@ -13,7 +13,7 @@
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "lint": "tsc --noEmit"
   },
-  "keywords": ["git", "vcs", "crdt", "content-addressable"],
+  "keywords": ["git", "vcs", "content-addressable"],
   "author": "Rishav Anand",
   "license": "MIT",
   "dependencies": {
