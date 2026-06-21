@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: matrix.node-version == '20.x'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  smoke-test:
+    name: Smoke test CLI
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run smoke test
+        env:
+          MGIT_AUTHOR_NAME: "CI Bot"
+          MGIT_AUTHOR_EMAIL: "ci@example.com"
+        run: |
+          set -euo pipefail
+
+          # Set up a temp directory
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+
+          echo "=== mgit init ==="
+          node $GITHUB_WORKSPACE/dist/cli.js init
+          test -d .mgit
+
+          echo "=== mgit add ==="
+          echo "hello, mini-git!" > hello.txt
+          node $GITHUB_WORKSPACE/dist/cli.js add hello.txt
+
+          echo "=== mgit commit ==="
+          node $GITHUB_WORKSPACE/dist/cli.js commit -m "initial commit"
+
+          echo "=== mgit log ==="
+          node $GITHUB_WORKSPACE/dist/cli.js log
+          node $GITHUB_WORKSPACE/dist/cli.js log --oneline
+
+          echo "=== mgit diff (no changes) ==="
+          node $GITHUB_WORKSPACE/dist/cli.js diff
+
+          echo "=== mgit branch ==="
+          node $GITHUB_WORKSPACE/dist/cli.js branch feature
+          node $GITHUB_WORKSPACE/dist/cli.js branch
+
+          echo "=== mgit switch ==="
+          node $GITHUB_WORKSPACE/dist/cli.js switch feature
+          echo "feature work" > feature.txt
+          node $GITHUB_WORKSPACE/dist/cli.js add feature.txt
+          node $GITHUB_WORKSPACE/dist/cli.js commit -m "feature commit"
+
+          echo "=== mgit checkout (by hash) ==="
+          HASH=$(node $GITHUB_WORKSPACE/dist/cli.js log --oneline | tail -1 | cut -d' ' -f1)
+          node $GITHUB_WORKSPACE/dist/cli.js checkout "$HASH"
+
+          echo "=== Smoke test PASSED ==="

@@ -1,0 +1,29 @@
+{
+  "name": "mini-git",
+  "version": "1.0.0",
+  "description": "A minimal Git implementation in TypeScript — content-addressable object store, Myers diff, branching",
+  "main": "dist/cli.js",
+  "bin": {
+    "mgit": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["git", "vcs", "crdt", "content-addressable"],
+  "author": "Rishav Anand",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.4",
+    "typescript": "^5.4.5"
+  }
+}
