@@ -89,14 +89,15 @@ export function cmdCommit(
   repo.assertInitialised();
 
   const index = repo.readIndex();
-  if (index.length === 0) {
+  const parentHash = repo.resolveHead();
+
+  if (!parentHash && index.length === 0) {
     throw new Error('Nothing to commit (index is empty). Use: mgit add <file>');
   }
 
   // Build nested tree entries from the flat index
   const treeHash = buildTree(repo, index);
 
-  const parentHash = repo.resolveHead();
   if (parentHash) {
     const parentObj = repo.store.read(parentHash);
     if (parentObj.type === 'commit' && parentObj.treeHash === treeHash) {
@@ -251,9 +252,35 @@ export function cmdCheckout(repo: Repository, ref: string): string {
     }
   }
 
+  // Phase 1: Pre-read all target blobs to ensure integrity BEFORE modifying working tree
+  const targetBlobs = new Map<string, Buffer>();
+  for (const p of pathsToUpdate) {
+    const hash = targetFiles.get(p)!;
+    const blobObj = repo.store.read(hash);
+    if (blobObj.type !== 'blob') throw new Error(`Not a blob: ${hash}`);
+    targetBlobs.set(p, blobObj.content);
+  }
+
+  // Phase 2: Conflict detection (exact matches and shape conflicts)
   for (const p of new Set([...pathsToUpdate, ...pathsToDelete])) {
     const inIndex = indexMap.has(p);
     const inWorking = workingMap.has(p);
+
+    // Shape conflict: ancestor is an untracked file
+    let parentDir = path.dirname(p);
+    while (parentDir !== '.') {
+      if (workingMap.has(parentDir) && !indexMap.has(parentDir)) {
+        throw new Error(`Checkout would overwrite untracked file with directory: ${parentDir}`);
+      }
+      parentDir = path.dirname(parentDir);
+    }
+    
+    // Shape conflict: descendant is an untracked file
+    for (const workingFile of workingMap.keys()) {
+      if (workingFile.startsWith(p + '/') && !indexMap.has(workingFile)) {
+        throw new Error(`Checkout would overwrite untracked file inside directory: ${workingFile}`);
+      }
+    }
 
     if (!inIndex && inWorking) {
       throw new Error(`The following untracked working tree files would be overwritten by checkout:\n  ${p}\nPlease move or remove them before you switch branches.`);
@@ -267,10 +294,27 @@ export function cmdCheckout(repo: Repository, ref: string): string {
     }
   }
 
+  // Phase 3: Write to temp files
+  const crypto = require('crypto');
+  const tmpDir = path.join(repo.mgitDir, 'tmp');
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  
+  const tempFiles = new Map<string, string>();
+  for (const [p, content] of targetBlobs.entries()) {
+    const tempPath = path.join(tmpDir, crypto.randomBytes(8).toString('hex'));
+    fs.writeFileSync(tempPath, content);
+    tempFiles.set(p, tempPath);
+  }
+
+  // Phase 4: Apply to working directory
   for (const p of pathsToDelete) {
     const absPath = ensureInsideRepo(repo.root, p);
     if (fs.existsSync(absPath)) {
-      fs.unlinkSync(absPath);
+      if (fs.statSync(absPath).isDirectory()) {
+        fs.rmSync(absPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(absPath);
+      }
       let dir = path.dirname(absPath);
       while (dir !== repo.root) {
         try { fs.rmdirSync(dir); dir = path.dirname(dir); } catch { break; }
@@ -279,13 +323,20 @@ export function cmdCheckout(repo: Repository, ref: string): string {
   }
 
   for (const p of pathsToUpdate) {
-    const hash = targetFiles.get(p)!;
-    const blobObj = repo.store.read(hash);
-    if (blobObj.type !== 'blob') throw new Error(`Not a blob: ${hash}`);
     const absPath = ensureInsideRepo(repo.root, p);
+    
+    if (fs.existsSync(absPath) && fs.statSync(absPath).isDirectory()) {
+      fs.rmSync(absPath, { recursive: true, force: true });
+    }
+    
     const dir = path.dirname(absPath);
+    if (fs.existsSync(dir) && fs.statSync(dir).isFile()) {
+      fs.unlinkSync(dir);
+    }
+    
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(absPath, blobObj.content);
+    
+    fs.renameSync(tempFiles.get(p)!, absPath);
     restored.push(p);
   }
 

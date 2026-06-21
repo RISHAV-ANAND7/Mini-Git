@@ -213,9 +213,31 @@ describe('cmdCommit', () => {
     expect(commit2.parentHash).toBe(h1);
   });
 
-  it('throws if index is empty', () => {
+  it('throws if index is empty and there is no parent commit', () => {
     repo.writeIndex([]);
     expect(() => cmdCommit(repo, 'empty', 'Test <t@t.com>')).toThrow('Nothing to commit');
+  });
+
+  it('allows empty index commit if removing the final tracked file', () => {
+    // Add a file in the first commit
+    const { hash: firstHash } = cmdCommit(repo, 'first commit', 'Test <t@t.com>');
+    
+    // Now simulate deleting all tracked files
+    repo.writeIndex([]);
+    
+    // This should now succeed
+    const { hash: secondHash } = cmdCommit(repo, 'delete all', 'Test <t@t.com>');
+    
+    const commit = repo.store.read(secondHash);
+    if (commit.type !== 'commit') throw new Error('not a commit');
+    const tree = repo.store.read(commit.treeHash);
+    if (tree.type !== 'tree') throw new Error('not a tree');
+    expect(tree.entries).toHaveLength(0);
+  });
+
+  it('throws if working tree clean (new tree equals parent tree)', () => {
+    cmdCommit(repo, 'first commit', 'Test <t@t.com>');
+    expect(() => cmdCommit(repo, 'empty', 'Test <t@t.com>')).toThrow('Nothing to commit (working tree clean)');
   });
 
   it('output string contains short hash and message', () => {

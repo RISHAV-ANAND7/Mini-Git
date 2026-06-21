@@ -163,6 +163,79 @@ describe('Adversarial Tests', () => {
     expect(entry).toBeDefined();
   });
 
+  test('Shape conflict: target file blocked by untracked directory', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'src'), 'src as file'); // target is 'src' file
+    cmdAdd(repo, 'src');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    // Main has no 'src' file. We create 'src' directory with untracked file.
+    fs.mkdirSync(path.join(repoPath, 'src'));
+    fs.writeFileSync(path.join(repoPath, 'src', 'foo.ts'), 'untracked');
+    
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/overwrite untracked file inside directory: src[\\\/]foo.ts/);
+  });
+
+  test('Shape conflict: target directory blocked by untracked file', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.mkdirSync(path.join(repoPath, 'src'));
+    fs.writeFileSync(path.join(repoPath, 'src', 'foo.ts'), 'src file');
+    cmdAdd(repo, 'src/foo.ts');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    // Main has no 'src' dir. We create 'src' as an untracked file.
+    fs.writeFileSync(path.join(repoPath, 'src'), 'untracked file');
+    
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/overwrite untracked file with directory: src/);
+  });
+
+  test('Atomic checkout prevents partial updates on corrupt blob', () => {
+    // 1. Initial commit on main
+    fs.writeFileSync(path.join(repoPath, 'file1.txt'), 'file1-main');
+    fs.writeFileSync(path.join(repoPath, 'file2.txt'), 'file2-main');
+    cmdAdd(repo, 'file1.txt');
+    cmdAdd(repo, 'file2.txt');
+    cmdCommit(repo, 'main commit');
+
+    // 2. Create and switch to dev
+    cmdBranch(repo, 'dev');
+    cmdCheckout(repo, 'dev');
+
+    // 3. Modify both files on dev
+    fs.writeFileSync(path.join(repoPath, 'file1.txt'), 'file1-dev');
+    fs.writeFileSync(path.join(repoPath, 'file2.txt'), 'file2-dev');
+    cmdAdd(repo, 'file1.txt');
+    cmdAdd(repo, 'file2.txt');
+    cmdCommit(repo, 'dev commit');
+
+    // 4. Back to main
+    cmdCheckout(repo, 'main');
+
+    // 5. Corrupt file2-dev's blob
+    const file2DevHash = require('../src/hash').sha1(require('../src/store').serialise({ type: 'blob', content: Buffer.from('file2-dev') }));
+    const { dir, file } = require('../src/hash').objectPath(file2DevHash);
+    const objPath = path.join(repoPath, '.mgit', 'objects', dir, file);
+    fs.writeFileSync(objPath, Buffer.from('corrupt'));
+
+    // 6. Attempt to checkout dev. Should fail during pre-read of file2-dev.
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/Corrupt object detected/);
+
+    // 7. Verify working directory was not partially modified (file1 should remain file1-main)
+    expect(fs.readFileSync(path.join(repoPath, 'file1.txt'), 'utf8')).toBe('file1-main');
+  });
+
   test('Empty commit check', () => {
     fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
     cmdAdd(repo, 'a.txt');
