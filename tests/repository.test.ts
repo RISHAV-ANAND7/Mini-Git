@@ -105,6 +105,14 @@ describe('branch management', () => {
     expect(branches).toContain('dev');
   });
 
+  it('listBranches includes nested branches', () => {
+    repo.writeBranch('feature/ui/auth', 'c'.repeat(40));
+    repo.writeBranch('feature/api', 'd'.repeat(40));
+    const branches = repo.listBranches();
+    expect(branches).toContain('feature/ui/auth');
+    expect(branches).toContain('feature/api');
+  });
+
   it('currentBranch returns null when HEAD is detached', () => {
     repo.writeHead({ type: 'detached', hash: 'a'.repeat(40) });
     expect(repo.currentBranch()).toBeNull();

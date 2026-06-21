@@ -36,26 +36,103 @@ describe('Adversarial Tests', () => {
     expect(() => cmdBranch(repo, 'feature foo')).toThrow(/Invalid branch name/);
   });
 
-  test('Safe-checkout conflict detection', () => {
+  test('Safe-checkout conflict detection (unstaged modification)', () => {
     fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
     cmdAdd(repo, 'a.txt');
     cmdCommit(repo, 'first commit');
     cmdBranch(repo, 'dev');
     
-    // Switch to dev, change a.txt, commit
     cmdCheckout(repo, 'dev');
     fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello dev');
     cmdAdd(repo, 'a.txt');
     cmdCommit(repo, 'dev commit');
 
-    // Switch back to main
     cmdCheckout(repo, 'main');
-
-    // Now modify working tree a.txt
     fs.writeFileSync(path.join(repoPath, 'a.txt'), 'uncommitted changes');
-
-    // Attempting to checkout dev should fail because it would overwrite 'a.txt' which has uncommitted changes
     expect(() => cmdCheckout(repo, 'dev')).toThrow(/would be overwritten by checkout/);
+  });
+
+  test('Staged modification blocks checkout', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello dev');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'staged changes');
+    cmdAdd(repo, 'a.txt');
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/would be overwritten by checkout/);
+  });
+
+  test('Staged deletion blocks checkout', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello dev');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    fs.unlinkSync(path.join(repoPath, 'a.txt'));
+    repo.stageFile({ path: 'a.txt', hash: '' }); // simulate staged deletion or mgit add deleted
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/would be overwritten by checkout/);
+  });
+
+  test('Staged new-file conflict blocks checkout', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'new.txt'), 'hello dev');
+    cmdAdd(repo, 'new.txt');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    fs.writeFileSync(path.join(repoPath, 'new.txt'), 'staged new file');
+    cmdAdd(repo, 'new.txt');
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/would be overwritten by checkout/);
+  });
+
+  test('Locally deleted file conflict blocks checkout', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello dev');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    fs.unlinkSync(path.join(repoPath, 'a.txt'));
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/would be overwritten by checkout/);
+  });
+
+  test('Untracked file overwritten by target blocks checkout', () => {
+    fs.writeFileSync(path.join(repoPath, 'a.txt'), 'hello');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first commit');
+    cmdBranch(repo, 'dev');
+    
+    cmdCheckout(repo, 'dev');
+    fs.writeFileSync(path.join(repoPath, 'untracked.txt'), 'in dev');
+    cmdAdd(repo, 'untracked.txt');
+    cmdCommit(repo, 'dev commit');
+
+    cmdCheckout(repo, 'main');
+    fs.writeFileSync(path.join(repoPath, 'untracked.txt'), 'untracked file in main');
+    expect(() => cmdCheckout(repo, 'dev')).toThrow(/untracked working tree files would be overwritten/);
   });
 
   test('Binary safe blob storage', () => {

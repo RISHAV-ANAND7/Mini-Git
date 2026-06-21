@@ -149,4 +149,52 @@ describe('ObjectStore', () => {
     const raw  = store.readRaw(hash);
     expect(sha1(raw)).toBe(hash); // content-addressability verified
   });
+
+  it('read throws if the object hash does not match the content (corruption)', () => {
+    const blob: BlobObject = { type: 'blob', content: Buffer.from('good content') };
+    const hash = store.write(blob);
+    
+    // Corrupt the file on disk manually
+    const { dir: objDir, file } = require('../src/hash').objectPath(hash);
+    const filePath = path.join(dir, 'objects', objDir, file);
+    fs.writeFileSync(filePath, Buffer.from('corrupt content'));
+
+    expect(() => store.read(hash)).toThrow(/Corrupt object detected/);
+  });
+});
+
+describe('deserialise malformed objects rejection', () => {
+  it('rejects unknown object types', () => {
+    expect(() => deserialise(Buffer.from('unknown\nbody'))).toThrow(/Unknown object format/);
+    expect(() => deserialise(Buffer.from('noune'))).toThrow(/Unknown object format/);
+  });
+
+  it('rejects malformed blob', () => {
+    expect(() => deserialise(Buffer.from('blob \ncontent'))).toThrow(/Invalid blob length header/);
+    expect(() => deserialise(Buffer.from('blob abc\ncontent'))).toThrow(/Invalid blob length header/);
+    expect(() => deserialise(Buffer.from('blob 100\ncontent'))).toThrow(/Blob length mismatch/);
+  });
+
+  it('rejects malformed tree headers', () => {
+    expect(() => deserialise(Buffer.from('tree \n'))).toThrow(/Invalid tree entry count/);
+    expect(() => deserialise(Buffer.from('tree abc\n'))).toThrow(/Invalid tree entry count/);
+  });
+
+  it('rejects malformed tree bodies', () => {
+    expect(() => deserialise(Buffer.from('tree 1\nno-null-byte'))).toThrow(/Tree body must end with null byte/);
+    expect(() => deserialise(Buffer.from('tree 1\nbad-entry\0'))).toThrow(/Malformed tree entry/);
+    expect(() => deserialise(Buffer.from(`tree 1\n999999 ${'a'.repeat(40)} name\0`))).toThrow(/Invalid tree entry mode/);
+    expect(() => deserialise(Buffer.from(`tree 1\n100644 bad-hash name\0`))).toThrow(/Invalid tree entry hash/);
+    expect(() => deserialise(Buffer.from(`tree 1\n100644 ${'a'.repeat(40)} \0`))).toThrow(/Tree entry name cannot be empty/);
+    expect(() => deserialise(Buffer.from(`tree 1\n100644 ${'a'.repeat(40)} name\x00100644 ${'b'.repeat(40)} name2\x00`))).toThrow(/Tree entry count mismatch/);
+  });
+
+  it('rejects malformed commits', () => {
+    expect(() => deserialise(Buffer.from('commit\n'))).toThrow(/Commit missing field/);
+    expect(() => deserialise(Buffer.from('commit\ntree bad\n'))).toThrow(/Invalid commit tree hash/);
+    expect(() => deserialise(Buffer.from(`commit\ntree ${'a'.repeat(40)}\nparent bad\n`))).toThrow(/Invalid commit parent hash/);
+    expect(() => deserialise(Buffer.from(`commit\ntree ${'a'.repeat(40)}\nparent null\nauthor \n`))).toThrow(/Commit author cannot be empty/);
+    expect(() => deserialise(Buffer.from(`commit\ntree ${'a'.repeat(40)}\nparent null\nauthor Alice\ntimestamp bad\n`))).toThrow(/Invalid commit timestamp/);
+    expect(() => deserialise(Buffer.from(`commit\ntree ${'a'.repeat(40)}\nparent null\nauthor Alice\ntimestamp 1234\nno-blank-line`))).toThrow(/Commit missing blank line/);
+  });
 });

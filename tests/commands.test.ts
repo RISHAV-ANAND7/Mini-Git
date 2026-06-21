@@ -445,3 +445,104 @@ describe('cmdDiff', () => {
     expect(diff).toContain('+gamma');
   });
 });
+
+// ─── status ──────────────────────────────────────────────────────────────────
+
+describe('cmdStatus', () => {
+  let root: string;
+  let repo: Repository;
+
+  beforeEach(() => {
+    ({ root, repo } = tempRepo());
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('shows clean working tree', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first', 'A <a@a.com>');
+    const status = require('../src/commands').cmdStatus(repo);
+    expect(status).toContain('nothing to commit, working tree clean');
+  });
+
+  it('shows untracked files', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    const status = require('../src/commands').cmdStatus(repo);
+    expect(status).toContain('Untracked files:');
+    expect(status).toContain('a.txt');
+  });
+
+  it('shows staged and unstaged files', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first', 'A <a@a.com>');
+
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a modified'); // unstaged
+    fs.writeFileSync(path.join(root, 'b.txt'), 'b');
+    cmdAdd(repo, 'b.txt'); // staged
+
+    const status = require('../src/commands').cmdStatus(repo);
+    expect(status).toContain('Changes to be committed:');
+    expect(status).toContain('modified/added:   b.txt');
+    expect(status).toContain('Changes not staged for commit:');
+    expect(status).toContain('modified/deleted: a.txt');
+  });
+
+  it('shows deleted files correctly', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    cmdAdd(repo, 'a.txt');
+    cmdCommit(repo, 'first', 'A <a@a.com>');
+
+    fs.unlinkSync(path.join(root, 'a.txt')); // deleted from working tree
+    let status = require('../src/commands').cmdStatus(repo);
+    expect(status).toContain('modified/deleted: a.txt (deleted)');
+
+    repo.stageFile({ path: 'a.txt', hash: '' }); // staged deletion
+    status = require('../src/commands').cmdStatus(repo);
+    expect(status).toContain('a.txt (deleted)');
+  });
+});
+
+// ─── ls-tree ─────────────────────────────────────────────────────────────────
+
+describe('cmdLsTree', () => {
+  let root: string;
+  let repo: Repository;
+
+  beforeEach(() => {
+    ({ root, repo } = tempRepo());
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('lists tree contents for a commit', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    fs.mkdirSync(path.join(root, 'dir'));
+    fs.writeFileSync(path.join(root, 'dir', 'b.txt'), 'b');
+    cmdAdd(repo, 'a.txt');
+    cmdAdd(repo, 'dir/b.txt');
+    const { hash } = cmdCommit(repo, 'first', 'A <a@a.com>');
+
+    const out = require('../src/commands').cmdLsTree(repo, hash);
+    expect(out).toContain('100644 blob');
+    expect(out).toContain('a.txt');
+    expect(out).toContain('040000 tree');
+    expect(out).toContain('dir');
+  });
+
+  it('throws for unknown ref', () => {
+    expect(() => require('../src/commands').cmdLsTree(repo, 'bad')).toThrow('Unknown ref: bad');
+  });
+
+  it('throws for non-tree objects', () => {
+    fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+    cmdAdd(repo, 'a.txt');
+    const blobHash = repo.readIndex()[0]!.hash;
+    expect(() => require('../src/commands').cmdLsTree(repo, blobHash)).toThrow('Not a commit or tree');
+  });
+});

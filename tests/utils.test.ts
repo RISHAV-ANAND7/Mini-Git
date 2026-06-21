@@ -38,6 +38,24 @@ describe('listFilesRecursive', () => {
   it('returns empty array for empty directory', () => {
     expect(listFilesRecursive(root)).toEqual([]);
   });
+
+  it('ignores symlinks to prevent recursion', () => {
+    try {
+      fs.mkdirSync(path.join(root, 'dir1'));
+      fs.writeFileSync(path.join(root, 'dir1', 'file.txt'), 'file');
+      // Create a symlink/junction that points back to root or a directory
+      fs.symlinkSync(path.join(root, 'dir1'), path.join(root, 'link1'), 'junction');
+      
+      const files = listFilesRecursive(root).sort();
+      expect(files).toEqual(['dir1/file.txt']); // link1 is ignored completely
+    } catch (err: any) {
+      if (err.code === 'EPERM') {
+        console.warn('Skipping symlink test due to Windows permissions');
+      } else {
+        throw err;
+      }
+    }
+  });
 });
 
 describe('formatDate', () => {

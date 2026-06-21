@@ -164,6 +164,29 @@ describe('Content-addressability invariants', () => {
     const raw = repo.store.readRaw(storedHash);
     expect(sha1(raw)).toBe(storedHash);
   });
+
+  it('recursive tree round trip correctly builds and flattens nested structures', () => {
+    write(root, 'initial.txt', 'init');
+    cmdAddAll(repo);
+    const { hash: initialCommit } = cmdCommit(repo, 'initial', 'A <a@a.com>');
+
+    write(root, 'a.txt', 'a');
+    write(root, 'docs/b.txt', 'b');
+    write(root, 'docs/nested/c.txt', 'c');
+    cmdAddAll(repo);
+    const { hash: nestedCommit } = cmdCommit(repo, 'nested', 'A <a@a.com>');
+
+    // Switch to initial commit to remove the nested files
+    cmdCheckout(repo, initialCommit);
+    expect(fs.existsSync(path.join(root, 'a.txt'))).toBe(false);
+
+    // Checkout the nested commit to restore them via recursive tree parsing
+    cmdCheckout(repo, nestedCommit);
+
+    expect(read(root, 'a.txt')).toBe('a');
+    expect(read(root, 'docs/b.txt')).toBe('b');
+    expect(read(root, 'docs/nested/c.txt')).toBe('c');
+  });
 });
 
 describe('mgit add .', () => {
