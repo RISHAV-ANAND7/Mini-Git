@@ -39,15 +39,45 @@ export function padStart(s: string, width: number): string {
   return s.length >= width ? s : ' '.repeat(width - s.length) + s;
 }
 
-/**
- * Ensure that a given target path resolves inside the repository root.
- * Throws an error if the path attempts to escape the repository (path traversal).
- */
 export function ensureInsideRepo(repoRoot: string, targetPath: string): string {
   const absPath = path.resolve(repoRoot, targetPath);
-  const relPath = path.relative(repoRoot, absPath);
+  
+  let resolvedPath = absPath;
+  if (fs.existsSync(absPath)) {
+    resolvedPath = fs.realpathSync(absPath);
+  } else {
+    let dir = path.dirname(absPath);
+    while (dir !== repoRoot && !fs.existsSync(dir)) {
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    if (fs.existsSync(dir)) {
+      const realDir = fs.realpathSync(dir);
+      resolvedPath = path.join(realDir, path.relative(dir, absPath));
+    }
+  }
+
+  const relPath = path.relative(repoRoot, resolvedPath);
   if (relPath.startsWith('..') || path.isAbsolute(relPath)) {
     throw new Error(`Path traversal detected: '${targetPath}' resolves outside the repository`);
   }
   return absPath;
+}
+
+/**
+ * Recursively list all files in a directory, returning relative paths.
+ */
+export function listFiles(dir: string, base: string = dir): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(dir)) {
+    const absPath = path.join(dir, entry);
+    if (fs.statSync(absPath).isDirectory()) {
+      results.push(...listFiles(absPath, base));
+    } else {
+      results.push(path.relative(base, absPath).replace(/\\/g, '/'));
+    }
+  }
+  return results;
 }

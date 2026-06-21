@@ -146,17 +146,8 @@ program
   .action(() => {
     run(() => {
       const repo = Repository.discover();
-      const head     = repo.readHead();
-      const branch   = head.type === 'branch' ? `On branch ${head.name}` : `HEAD detached at ${head.hash.slice(0, 7)}`;
-      const index    = repo.readIndex();
-      const staged   = index.map(e => `        ${e.path}`).join('\n');
-      console.log(branch);
-      if (index.length > 0) {
-        console.log('\nChanges to be committed:');
-        console.log(staged);
-      } else {
-        console.log('\nNothing to commit (empty index)');
-      }
+      const { cmdStatus } = require('./commands');
+      console.log(cmdStatus(repo));
     });
   });
 

@@ -33,7 +33,14 @@ export function cmdAdd(repo: Repository, filePath: string): string {
   repo.assertInitialised();
 
   const absPath = ensureInsideRepo(repo.root, filePath);
+  const relPath = path.relative(repo.root, absPath).replace(/\\/g, '/');
+
   if (!fs.existsSync(absPath)) {
+    const index = repo.readIndex();
+    if (index.some(e => e.path === relPath)) {
+      repo.writeIndex(index.filter(e => e.path !== relPath));
+      return `rm: ${relPath}`;
+    }
     throw new Error(`pathspec '${filePath}' did not match any files`);
   }
 
@@ -41,8 +48,6 @@ export function cmdAdd(repo: Repository, filePath: string): string {
   const blob: BlobObject = { type: 'blob', content };
   const hash = repo.store.write(blob);
 
-  // Store path relative to repo root so it's portable
-  const relPath = path.relative(repo.root, absPath).replace(/\\/g, '/');
   repo.stageFile({ path: relPath, hash });
 
   return `add: ${relPath} → ${shortHash(hash)}`;
@@ -58,13 +63,21 @@ export function cmdAdd(repo: Repository, filePath: string): string {
  */
 export function cmdAddAll(repo: Repository): string {
   repo.assertInitialised();
-  const files = listFilesRecursive(repo.root);
-  if (files.length === 0) return 'Nothing to add.';
+  const filesOnDisk = listFilesRecursive(repo.root);
+  const index = repo.readIndex();
+  
+  const allFiles = new Set([...filesOnDisk, ...index.map(e => e.path)]);
+  if (allFiles.size === 0) return 'Nothing to add.';
+  
   const results: string[] = [];
-  for (const file of files) {
-    results.push(cmdAdd(repo, file));
+  for (const file of allFiles) {
+    try {
+      results.push(cmdAdd(repo, file));
+    } catch (e) {
+      // Ignore files that are not on disk and not in index
+    }
   }
-  return results.join('\n');
+  return results.filter(Boolean).join('\n');
 }
 
 // ─── commit ──────────────────────────────────────────────────────────────────
@@ -81,17 +94,8 @@ export function cmdCommit(
     throw new Error('Nothing to commit (index is empty). Use: mgit add <file>');
   }
 
-  // Build tree entries from the flat index
-  // Note: this implementation uses a single flat tree (no sub-trees) for simplicity.
-  // Nested directory support would require building a tree of trees.
-  const entries: TreeEntry[] = index.map(e => ({
-    mode: '100644' as const,
-    name: e.path,
-    hash: e.hash,
-  }));
-
-  const tree: TreeObject = { type: 'tree', entries };
-  const treeHash = repo.store.write(tree);
+  // Build nested tree entries from the flat index
+  const treeHash = buildTree(repo, index);
 
   const parentHash = repo.resolveHead();
   if (parentHash) {
@@ -209,21 +213,34 @@ export function cmdCheckout(repo: Repository, ref: string): string {
 
   // Restore files
   const restored: string[] = [];
-  const targetPaths = new Set(treeObj.entries.map(e => e.name));
+  const targetFiles = flattenTree(repo, commitObj.treeHash);
+  const targetPaths = new Set(targetFiles.keys());
 
-  // Remove files in the working tree that are NOT in the target tree
-  // (only remove files that were tracked — i.e. present in current index)
+  // Safe-checkout conflict detection: Untracked and Unstaged changes
   const currentIndex = repo.readIndex();
+  const indexMap = new Map(currentIndex.map(e => [e.path, e.hash]));
+  
+  const workingFiles = listFilesRecursive(repo.root);
+  const workingMap = new Map<string, Hash>();
+  for (const f of workingFiles) {
+    const absPath = path.join(repo.root, f);
+    if (!fs.existsSync(absPath)) continue;
+    const content = fs.readFileSync(absPath);
+    workingMap.set(f, sha1(serialise({ type: 'blob', content })));
+  }
 
-  // Safe-checkout conflict detection
-  for (const entry of currentIndex) {
-    const absPath = path.join(repo.root, entry.path);
-    if (fs.existsSync(absPath)) {
-      const workingContent = fs.readFileSync(absPath);
-      // Constructing blob to get its hash. Since BlobObject content is Buffer.
-      const workingHash = sha1(serialise({ type: 'blob', content: workingContent }));
-      if (workingHash !== entry.hash) {
-        throw new Error(`Your local changes to '${entry.path}' would be overwritten by checkout.\nPlease commit your changes before you switch branches.`);
+  for (const targetPath of targetPaths) {
+    const targetHash = targetFiles.get(targetPath)!;
+    const inIndex = indexMap.has(targetPath);
+    const inWorking = workingMap.has(targetPath);
+    
+    if (inWorking) {
+      if (!inIndex) {
+        throw new Error(`The following untracked working tree files would be overwritten by checkout:\n  ${targetPath}\nPlease move or remove them before you switch branches.`);
+      } else {
+        if (workingMap.get(targetPath) !== indexMap.get(targetPath)) {
+          throw new Error(`Your local changes to '${targetPath}' would be overwritten by checkout.\nPlease commit your changes before you switch branches.`);
+        }
       }
     }
   }
@@ -233,11 +250,10 @@ export function cmdCheckout(repo: Repository, ref: string): string {
       const absPath = ensureInsideRepo(repo.root, entry.path);
       if (fs.existsSync(absPath)) {
         fs.unlinkSync(absPath);
-        // Clean up empty parent directories
         let dir = path.dirname(absPath);
         while (dir !== repo.root) {
           try {
-            fs.rmdirSync(dir); // only removes if empty
+            fs.rmdirSync(dir);
             dir = path.dirname(dir);
           } catch { break; }
         }
@@ -245,22 +261,22 @@ export function cmdCheckout(repo: Repository, ref: string): string {
     }
   }
 
-  for (const entry of treeObj.entries) {
-    const blobObj = repo.store.read(entry.hash);
+  for (const [targetPath, hash] of targetFiles.entries()) {
+    const blobObj = repo.store.read(hash);
     if (blobObj.type !== 'blob') {
-      throw new Error(`Not a blob: ${entry.hash}`);
+      throw new Error(`Not a blob: ${hash}`);
     }
-    const absPath = ensureInsideRepo(repo.root, entry.name);
+    const absPath = ensureInsideRepo(repo.root, targetPath);
     const dir = path.dirname(absPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(absPath, blobObj.content);
-    restored.push(entry.name);
+    restored.push(targetPath);
   }
 
   // Restore index to match the checked-out tree
-  const newIndex: IndexEntry[] = treeObj.entries.map(e => ({
-    path: e.name,
-    hash: e.hash,
+  const newIndex: IndexEntry[] = Array.from(targetFiles.entries()).map(([p, h]) => ({
+    path: p,
+    hash: h,
   }));
   repo.writeIndex(newIndex);
 
@@ -296,14 +312,12 @@ export function cmdDiff(repo: Repository): string {
     if (commitHash) {
       const commitObj = repo.store.read(commitHash);
       if (commitObj.type === 'commit') {
-        const treeObj = repo.store.read(commitObj.treeHash);
-        if (treeObj.type === 'tree') {
-          const treeEntry = treeObj.entries.find(e => e.name === entry.path);
-          if (treeEntry) {
-            const blobObj = repo.store.read(treeEntry.hash);
-            if (blobObj.type === 'blob') {
-              committedContent = blobObj.content.toString('utf8');
-            }
+        const targetFiles = flattenTree(repo, commitObj.treeHash);
+        const targetHash = targetFiles.get(entry.path);
+        if (targetHash) {
+          const blobObj = repo.store.read(targetHash);
+          if (blobObj.type === 'blob') {
+            committedContent = blobObj.content.toString('utf8');
           }
         }
       }
@@ -449,6 +463,130 @@ export function cmdLsTree(repo: Repository, ref: string): string {
   if (tree.type !== 'tree') throw new Error(`Not a tree: ${treeHash}`);
 
   return tree.entries
-    .map(e => `${e.mode} blob ${e.hash}\t${e.name}`)
+    .map(e => `${e.mode} ${e.mode === '040000' ? 'tree' : 'blob'} ${e.hash}\t${e.name}`)
     .join('\n');
+}
+
+// ─── status ──────────────────────────────────────────────────────────────────
+
+export function cmdStatus(repo: Repository): string {
+  repo.assertInitialised();
+
+  const head = repo.readHead();
+  const commitHash = repo.resolveHead();
+  let headFiles = new Map<string, Hash>();
+  if (commitHash) {
+    const commitObj = repo.store.read(commitHash);
+    if (commitObj.type === 'commit') {
+      headFiles = flattenTree(repo, commitObj.treeHash);
+    }
+  }
+
+  const index = repo.readIndex();
+  const indexMap = new Map(index.map(e => [e.path, e.hash]));
+
+  const workingFiles = listFilesRecursive(repo.root);
+  const workingMap = new Map<string, Hash>();
+  for (const f of workingFiles) {
+    const absPath = path.join(repo.root, f);
+    if (!fs.existsSync(absPath)) continue;
+    const content = fs.readFileSync(absPath);
+    workingMap.set(f, sha1(serialise({ type: 'blob', content })));
+  }
+
+  const staged: string[] = [];
+  const unstaged: string[] = [];
+  const untracked: string[] = [];
+
+  // Changes to be committed (Index vs HEAD)
+  for (const [p, hash] of indexMap.entries()) {
+    if (headFiles.get(p) !== hash) staged.push(p);
+  }
+  for (const [p] of headFiles.entries()) {
+    if (!indexMap.has(p)) staged.push(p + ' (deleted)');
+  }
+
+  // Changes not staged for commit (Working vs Index)
+  for (const [p, hash] of workingMap.entries()) {
+    if (indexMap.has(p)) {
+      if (indexMap.get(p) !== hash) unstaged.push(p);
+    } else {
+      untracked.push(p);
+    }
+  }
+  for (const [p] of indexMap.entries()) {
+    if (!workingMap.has(p)) unstaged.push(p + ' (deleted)');
+  }
+
+  staged.sort();
+  unstaged.sort();
+  untracked.sort();
+
+  const lines: string[] = [];
+  lines.push(head.type === 'branch' ? `On branch ${head.name}` : `HEAD detached at ${head.hash.slice(0, 7)}`);
+  
+  if (staged.length > 0) {
+    lines.push('\nChanges to be committed:');
+    staged.forEach(p => lines.push(`  modified/added:   ${p}`));
+  }
+  if (unstaged.length > 0) {
+    lines.push('\nChanges not staged for commit:');
+    unstaged.forEach(p => lines.push(`  modified/deleted: ${p}`));
+  }
+  if (untracked.length > 0) {
+    lines.push('\nUntracked files:');
+    untracked.forEach(p => lines.push(`  ${p}`));
+  }
+  
+  if (staged.length === 0 && unstaged.length === 0 && untracked.length === 0) {
+    lines.push('nothing to commit, working tree clean');
+  }
+
+  return lines.join('\n');
+}
+
+// ─── Nested Tree Helpers ──────────────────────────────────────────────────────
+
+export function buildTree(repo: Repository, index: IndexEntry[]): Hash {
+  const rootTree: TreeEntry[] = [];
+  const groups = new Map<string, IndexEntry[]>();
+
+  for (const entry of index) {
+    const parts = entry.path.split('/');
+    if (parts.length === 1) {
+      rootTree.push({ mode: '100644', name: parts[0], hash: entry.hash });
+    } else {
+      const dir = parts[0];
+      if (!groups.has(dir)) groups.set(dir, []);
+      groups.get(dir)!.push({
+        path: parts.slice(1).join('/'),
+        hash: entry.hash
+      });
+    }
+  }
+
+  for (const [dir, subEntries] of groups.entries()) {
+    const subTreeHash = buildTree(repo, subEntries);
+    rootTree.push({ mode: '040000', name: dir, hash: subTreeHash });
+  }
+
+  const tree: TreeObject = { type: 'tree', entries: rootTree };
+  return repo.store.write(tree);
+}
+
+export function flattenTree(repo: Repository, treeHash: Hash, prefix: string = ''): Map<string, Hash> {
+  const map = new Map<string, Hash>();
+  const obj = repo.store.read(treeHash);
+  if (obj.type !== 'tree') return map;
+
+  for (const entry of obj.entries) {
+    const fullPath = prefix + entry.name;
+    if (entry.mode === '040000') {
+      const subMap = flattenTree(repo, entry.hash, fullPath + '/');
+      for (const [p, h] of subMap.entries()) map.set(p, h);
+    } else {
+      map.set(fullPath, entry.hash);
+    }
+  }
+  return map;
 }

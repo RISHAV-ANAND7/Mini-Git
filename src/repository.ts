@@ -16,6 +16,7 @@ import * as fs   from 'fs';
 import * as path from 'path';
 import { ObjectStore } from './store';
 import { isValidHash } from './hash';
+import { listFiles } from './utils';
 import type { Hash, Index, HeadRef, IndexEntry } from './types';
 
 export const MGIT_DIR       = '.mgit';
@@ -107,10 +108,7 @@ export class Repository {
   /** List all branch names. */
   listBranches(): string[] {
     const dir = path.join(this.mgitDir, REFS_HEADS_DIR);
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter(f =>
-      fs.statSync(path.join(dir, f)).isFile()
-    );
+    return listFiles(dir);
   }
 
   /** Current branch name, or null if HEAD is detached. */

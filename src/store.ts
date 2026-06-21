@@ -142,6 +142,9 @@ export class ObjectStore {
       throw new Error(`Object not found: ${hash}`);
     }
     const raw = fs.readFileSync(filePath);
+    if (sha1(raw) !== hash) {
+      throw new Error(`Corrupt object detected: ${hash}`);
+    }
     return deserialise(raw);
   }
 
